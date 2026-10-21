@@ -4,7 +4,9 @@
  *
  * Builds the structural-fingerprint baseline used by auto-update's
  * incremental change detection. Runs once per /understand full rebuild
- * (Phase 7 step 2.5), generating .understand-anything/fingerprints.json.
+ * (Phase 7 step 2.5), generating fingerprints.json in the project's data dir
+ * (`.ua/`, or legacy `.understand-anything/` — resolved by core's
+ * saveFingerprints via resolveUaDir).
  *
  * Replaces the LLM-written fingerprint script that previously sat in
  * SKILL.md as a code example — that example had the wrong signature
@@ -15,9 +17,14 @@
  *   node build-fingerprints.mjs <input.json>
  *
  * Input JSON:
- *   { projectRoot: string, sourceFilePaths: string[], gitCommitHash: string }
+ *   { projectRoot: string, filePaths: string[], gitCommitHash: string }
  *
- * Writes: <projectRoot>/.understand-anything/fingerprints.json
+ * `sourceFilePaths` remains accepted as a backwards-compatible alias. Full
+ * baselines should pass every analyzed path; unsupported formats receive a
+ * conservative content-only fingerprint from buildFingerprintStore().
+ *
+ * Writes: <projectRoot>/.ua/fingerprints.json (or legacy
+ *   <projectRoot>/.understand-anything/fingerprints.json when that dir exists)
  * Exit code: 0 on success (including 0 files analyzed); non-zero on error.
  */
 
@@ -59,13 +66,15 @@ async function main() {
     process.exit(1);
   }
 
-  const { projectRoot, sourceFilePaths, gitCommitHash } = JSON.parse(
+  const input = JSON.parse(
     readFileSync(inputPath, 'utf-8'),
   );
+  const { projectRoot, gitCommitHash } = input;
+  const filePaths = input.filePaths ?? input.sourceFilePaths;
 
-  if (!projectRoot || !Array.isArray(sourceFilePaths) || typeof gitCommitHash !== 'string') {
+  if (!projectRoot || !Array.isArray(filePaths) || typeof gitCommitHash !== 'string') {
     throw new Error(
-      'Invalid input: requires { projectRoot: string, sourceFilePaths: string[], gitCommitHash: string }',
+      'Invalid input: requires { projectRoot: string, filePaths: string[], gitCommitHash: string }',
     );
   }
 
@@ -80,7 +89,10 @@ async function main() {
   registry.register(tsPlugin);
   registerAllParsers(registry);
 
-  const store = buildFingerprintStore(projectRoot, sourceFilePaths, registry, gitCommitHash);
+  const structuralFingerprintLanguages = new Set(tsConfigs.map(config => config.id));
+  const store = buildFingerprintStore(projectRoot, filePaths, registry, gitCommitHash, {
+    structuralFingerprintLanguages,
+  });
   saveFingerprints(projectRoot, store);
 
   const fileCount = Object.keys(store.files).length;

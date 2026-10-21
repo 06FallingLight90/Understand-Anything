@@ -11,20 +11,26 @@ then reviews the output for semantic issues the script cannot catch.
 Usage:
     python merge-batch-graphs.py <project-root>
 
-Input:
-    <project-root>/.understand-anything/intermediate/batch-*.json
-
-Output:
-    <project-root>/.understand-anything/intermediate/assembled-graph.json
+Input/output live under the project's data dir (`.ua/`, or legacy
+`.understand-anything/` when that directory already exists):
+    Input:  <ua-dir>/intermediate/batch-*.json
+    Output: <ua-dir>/intermediate/assembled-graph.json
 """
 
 import json
 import os
 import re
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
+
+
+def resolve_ua_dir(root: Path) -> Path:
+    """Mirror core resolveUaDir: legacy .understand-anything/ wins if present."""
+    legacy = root / ".understand-anything"
+    return legacy if legacy.is_dir() else root / ".ua"
 
 
 # ── Configuration ─────────────────────────────────────────────────────────
@@ -37,6 +43,17 @@ VALID_NODE_PREFIXES = {
     # Knowledge-base node types (schema.ts NodeType enum)
     "article", "entity", "topic", "claim", "source",
 }
+
+# Precompiled once at import time. The previous inline form rebuilt and
+# re-escaped this 24-alternative pattern *string* on every node (the regex
+# cache keys on the final string, so only the compile was cached — the
+# join + re.escape work was not). Benchmarked ~15x faster on large graphs.
+# The `:`-delimited group + anchoring makes alternation order (and hence the
+# unordered-set iteration order) irrelevant to matching, so hoisting is
+# byte-for-byte equivalent.
+_PROJECT_PREFIX_RE = re.compile(
+    r"^[^:]+:(" + "|".join(re.escape(p) for p in VALID_NODE_PREFIXES) + r"):(.+)$"
+)
 
 # node.type → canonical ID prefix
 TYPE_TO_PREFIX: dict[str, str] = {
@@ -99,10 +116,24 @@ _TEST_NAME_PATTERNS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     ".py": (("test_",), ("_test",)),
     ".java": ((), ("Test", "Tests", "IT")),
     ".kt": ((), ("Test", "Tests")),
+    ".scala": ((), ("Spec", "Suite", "Test", "Tests")),
     ".cs": ((), ("Test", "Tests")),
+    ".swift": ((), ("Tests", "Test", "Spec")),
+    ".rs": (("test_",), ("_test",)),
+    ".rb": (("test_",), ("_test", "_spec")),
+    ".php": ((), ("Test",)),
     ".c": (("test_",), ("_test",)),
     ".cpp": (("test_",), ("_test",)),
     ".cc": (("test_",), ("_test",)),
+}
+
+# These language configs treat every source file below `tests/` as part of a
+# test target, even when the basename itself has no test marker.  JS/TS is
+# intentionally absent: files such as `__tests__/helpers.ts` remain helpers.
+_TEST_DIRECTORY_EXTENSIONS: frozenset[str] = frozenset({".swift", ".rs", ".php"})
+
+_EXACT_TEST_STEMS: dict[str, frozenset[str]] = {
+    ".rb": frozenset({"spec_helper"}),
 }
 
 
@@ -127,6 +158,30 @@ def _num(v: Any) -> float:
         return float(v)
     except (TypeError, ValueError):
         return 0.0
+
+
+def parse_batch_filename(name: str) -> tuple[int, int | None] | None:
+    """Return the logical batch index and optional part number for a batch file.
+
+    Incremental updates write the pruned baseline graph as `batch-existing.json`;
+    treat it as a real batch that sorts before freshly analyzed numeric batches.
+    """
+    if name == "batch-existing.json":
+        return (-1, None)
+
+    match = re.match(r"batch-(\d+)(?:-part-(\d+))?\.json", name)
+    if match is None:
+        return None
+    return (int(match.group(1)), int(match.group(2)) if match.group(2) else None)
+
+
+def batch_sort_key(path: Path) -> tuple[int, int, str]:
+    parsed = parse_batch_filename(path.name)
+    if parsed is None:
+        return (sys.maxsize, sys.maxsize, path.name)
+
+    batch_index, part_number = parsed
+    return (batch_index, part_number or 0, path.name)
 
 
 # ── Batch loading ─────────────────────────────────────────────────────────
@@ -188,7 +243,7 @@ def normalize_node_id(node_id: str, node: dict[str, Any]) -> str:
 
     # Strip project-name prefix: "my-project:file:src/foo.ts" → "file:src/foo.ts"
     # Pattern: <word>:<valid-prefix>:<path>
-    match = re.match(r"^[^:]+:(" + "|".join(re.escape(p) for p in VALID_NODE_PREFIXES) + r"):(.+)$", nid)
+    match = _PROJECT_PREFIX_RE.match(nid)
     if match:
         # Only strip if the first segment is NOT a valid prefix itself
         first_seg = nid.split(":")[0]
@@ -285,18 +340,28 @@ def _basename(path: str) -> str:
 
 
 def is_test_path(path: str) -> bool:
-    """Return True if `path` looks like a test file by basename convention.
+    """Return True if `path` looks like a test file by language convention.
 
-    Files inside `tests/`, `__tests__/`, `test/`, or `spec/` directories that
-    do NOT carry a recognized test extension are treated as helpers/fixtures
-    and classified as non-test (so `__tests__/helpers.ts` is not a test).
+    Most languages use basename markers. Swift, Rust, and PHP additionally
+    make `tests/` a test-source root. JS/TS files still require `.test` or
+    `.spec`, so `__tests__/helpers.ts` remains a non-test helper.
     """
     stem, ext = os.path.splitext(_basename(path))
+    ext = ext.lower()
 
     # JS/TS family: the test marker is an infix on the stem (foo.test.ts has
     # stem "foo.test", ext ".ts"), not a prefix/suffix on the stem itself.
     if ext in _JS_TS_TEST_EXTS:
         return stem.endswith(".test") or stem.endswith(".spec")
+
+    if ext in _TEST_DIRECTORY_EXTENSIONS and any(
+        segment.lower() == "tests" for segment in _path_segments(path)[:-1]
+    ):
+        return True
+
+    exact_stems = _EXACT_TEST_STEMS.get(ext)
+    if exact_stems is not None and stem in exact_stems:
+        return True
 
     patterns = _TEST_NAME_PATTERNS.get(ext)
     if patterns is None:
@@ -443,6 +508,25 @@ def production_candidates(test_path: str) -> list[str]:
                     new_dir = "/".join(["src", "main", "kotlin"] + list(dir_segs[3:]))
                     _add_unique(candidates, f"{new_dir}/{base_stem}.kt")
                 _add_unique(candidates, _join(dir_path, f"{base_stem}.kt"))
+                break
+
+    # ── Scala ─────────────────────────────────────────────────────────
+    elif ext == ".scala":
+        for suffix in ("Spec", "Suite", "Tests", "Test"):
+            if stem.endswith(suffix):
+                base_stem = stem[: -len(suffix)]
+                # sbt layout: swap any .../src/test/scala/... segment while
+                # preserving a module prefix such as modules/core/.
+                for i in range(0, max(len(dir_segs) - 2, 0)):
+                    if list(dir_segs[i : i + 3]) == ["src", "test", "scala"]:
+                        new_dir = "/".join(
+                            list(dir_segs[:i])
+                            + ["src", "main", "scala"]
+                            + list(dir_segs[i + 3 :])
+                        )
+                        _add_unique(candidates, f"{new_dir}/{base_stem}.scala")
+                        break
+                _add_unique(candidates, _join(dir_path, f"{base_stem}.scala"))
                 break
 
     # ── C# ────────────────────────────────────────────────────────────
@@ -721,7 +805,12 @@ def link_tests(
 
 # ── Main merge + normalize ────────────────────────────────────────────────
 
-def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
+def merge_and_normalize(
+    batches: list[dict[str, Any]],
+    *,
+    current_edge_ids: set[int] | None = None,
+    dangling_candidates: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
     """Merge batch results and normalize. Returns (assembled_graph, report_lines)."""
 
     # ── Pattern counters for "Fixed" report ──────────────────────────
@@ -814,14 +903,26 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
     # overwrite a `bidirectional` one (or vice versa); they're different
     # semantic relationships that the dashboard renders distinctly.
     edges_by_key: dict[tuple[str, str, str, str], dict] = {}
+    dangling_by_key: dict[tuple[str, str, str, str], dict] = {}
     for edge in all_edges:
         src = edge.get("source", "")
         tgt = edge.get("target", "")
         etype = edge.get("type", "")
         direction = normalize_direction(edge.get("direction"))
         edge["direction"] = direction
+        key = (src, tgt, etype, direction)
 
         if src not in node_ids or tgt not in node_ids:
+            # Preserve normalized CURRENT analyzer evidence before unresolved
+            # endpoints are discarded. Never collect edges from batch-existing.
+            if (
+                dangling_candidates is not None
+                and current_edge_ids is not None
+                and id(edge) in current_edge_ids
+            ):
+                previous = dangling_by_key.get(key)
+                if previous is None or _num(edge.get("weight", 0)) > _num(previous.get("weight", 0)):
+                    dangling_by_key[key] = dict(edge)
             missing = []
             if src not in node_ids:
                 missing.append(f"source '{src}'")
@@ -830,10 +931,12 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
             unfixable.append(f"Edge {src} → {tgt} ({etype}): dropped, missing {', '.join(missing)}")
             continue
 
-        key = (src, tgt, etype, direction)
         existing = edges_by_key.get(key)
         if existing is None or _num(edge.get("weight", 0)) > _num(existing.get("weight", 0)):
             edges_by_key[key] = edge
+
+    if dangling_candidates is not None:
+        dangling_candidates.extend(dangling_by_key.values())
 
     # ── Build report ─────────────────────────────────────────────────
     report: list[str] = []
@@ -910,6 +1013,56 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
 
 # ── Imports-edge recovery from importMap ──────────────────────────────────
 
+WHOLE_FILE_NODE_TYPES: frozenset[str] = frozenset(
+    {"file", "config", "document", "service", "pipeline", "schema", "resource"}
+)
+
+
+def build_whole_file_node_index(
+    nodes: list[dict[str, Any]],
+) -> tuple[dict[str, str], list[str]]:
+    """Map each filePath to its canonical whole-file node id.
+
+    Only exact ``<type>:<filePath>`` IDs qualify. This intentionally excludes
+    child constructs such as tables and endpoints, even when they carry the
+    same ``filePath``. If an analyzer emitted more than one whole-file node for
+    a path, ``file:`` wins; otherwise the first stable graph occurrence wins.
+    """
+    index: dict[str, str] = {}
+    selected_types: dict[str, str] = {}
+    warnings: list[str] = []
+
+    for node in nodes:
+        node_type = node.get("type")
+        file_path = node.get("filePath")
+        node_id = node.get("id")
+        if (
+            node_type not in WHOLE_FILE_NODE_TYPES
+            or not isinstance(file_path, str)
+            or not file_path
+            or node_id != f"{node_type}:{file_path}"
+        ):
+            continue
+
+        existing_id = index.get(file_path)
+        if existing_id is None:
+            index[file_path] = node_id
+            selected_types[file_path] = node_type
+            continue
+
+        existing_type = selected_types[file_path]
+        if node_type == "file" and existing_type != "file":
+            index[file_path] = node_id
+            selected_types[file_path] = node_type
+            selected = node_id
+        else:
+            selected = existing_id
+        warnings.append(
+            f"  Warning: multiple whole-file nodes for {file_path}; selected {selected}"
+        )
+
+    return index, warnings
+
 def recover_imports_from_scan(
     assembled: dict[str, Any],
     scan_result_path: Path,
@@ -935,11 +1088,9 @@ def recover_imports_from_scan(
     if not isinstance(import_map, dict):
         return 0, [f"  importMap recovery skipped — no importMap field in {scan_result_path.name}"]
 
-    # Build the set of file: node ids actually present in the assembled graph.
-    file_node_ids: set[str] = set()
-    for node in assembled["nodes"]:
-        if node.get("type") == "file":
-            file_node_ids.add(node.get("id", ""))
+    file_path_to_node_id, conflict_warnings = build_whole_file_node_index(
+        assembled["nodes"]
+    )
 
     # Build the set of (source, target) imports edges already present.
     existing: set[tuple[str, str]] = set()
@@ -953,16 +1104,16 @@ def recover_imports_from_scan(
     for src_path, targets in import_map.items():
         if not isinstance(targets, list):
             continue
-        src_id = f"file:{src_path}"
-        if src_id not in file_node_ids:
+        src_id = file_path_to_node_id.get(src_path)
+        if src_id is None:
             if targets:
                 skipped_no_src_node += 1
             continue
         for tgt_path in targets:
             if not isinstance(tgt_path, str) or not tgt_path:
                 continue
-            tgt_id = f"file:{tgt_path}"
-            if tgt_id not in file_node_ids:
+            tgt_id = file_path_to_node_id.get(tgt_path)
+            if tgt_id is None:
                 skipped_no_tgt_node += 1
                 continue
             if src_id == tgt_id:
@@ -980,7 +1131,7 @@ def recover_imports_from_scan(
             existing.add((src_id, tgt_id))
             recovered += 1
 
-    lines: list[str] = []
+    lines: list[str] = list(conflict_warnings)
     lines.append(
         f"  Recovered {recovered} `imports` edges from importMap "
         f"({len(import_map)} entries scanned)"
@@ -988,12 +1139,12 @@ def recover_imports_from_scan(
     if skipped_no_src_node:
         lines.append(
             f"  Skipped {skipped_no_src_node} importMap source files "
-            f"with no `file:` node in graph"
+            f"with no whole-file node in graph"
         )
     if skipped_no_tgt_node:
         lines.append(
             f"  Skipped {skipped_no_tgt_node} importMap target paths "
-            f"with no `file:` node in graph"
+            f"with no whole-file node in graph"
         )
     return recovered, lines
 
@@ -1006,18 +1157,21 @@ def main() -> None:
         sys.exit(1)
 
     project_root = Path(sys.argv[1]).resolve()
-    intermediate_dir = project_root / ".understand-anything" / "intermediate"
+    intermediate_dir = resolve_ua_dir(project_root) / "intermediate"
+    plan_path = intermediate_dir / "incremental-plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.exists() else {}
+    incremental = plan.get("action") in ("PARTIAL_UPDATE", "ARCHITECTURE_UPDATE")
 
     if not intermediate_dir.is_dir():
         print(f"Error: {intermediate_dir} does not exist", file=sys.stderr)
         sys.exit(1)
 
-    # Discover batch files, sorted by numeric index (not lexicographic)
+    # Discover batch files, sorted by numeric index (not lexicographic).
+    # `batch-existing.json` is the documented incremental baseline and must
+    # sort before fresh batches so fresh duplicate nodes/edges win later.
     batch_files = sorted(
         intermediate_dir.glob("batch-*.json"),
-        key=lambda p: int(re.search(r"batch-(\d+)", p.stem).group(1))
-        if re.search(r"batch-(\d+)", p.stem)
-        else 0,
+        key=batch_sort_key,
     )
     if not batch_files:
         print("Error: no batch-*.json files found in intermediate/", file=sys.stderr)
@@ -1025,19 +1179,20 @@ def main() -> None:
 
     # Group by logical batch index so the report distinguishes single-batch
     # files from multi-part file-analyzer outputs. Files that don't match the
-    # `batch-<N>.json` / `batch-<N>-part-<K>.json` pattern (e.g. fused
-    # `batch-fused-8-13.json`, range `batch-8-13.json`) would otherwise be
-    # silently dropped during load — flag them loudly instead so the user
-    # can fix the file-analyzer agent.
+    # `batch-existing.json` / `batch-<N>.json` / `batch-<N>-part-<K>.json`
+    # pattern (e.g. fused `batch-fused-8-13.json`, range `batch-8-13.json`)
+    # would otherwise be silently dropped during load — flag them loudly
+    # instead so the user can fix the file-analyzer agent.
     from collections import defaultdict as _dd
     by_batch = _dd(list)
     unrecognized_batch_files: list[str] = []
     for f in batch_files:
-        m = re.match(r"batch-(\d+)(?:-part-(\d+))?\.json", f.name)
-        if m:
-            by_batch[int(m.group(1))].append((f.name, int(m.group(2)) if m.group(2) else None))
-        else:
+        parsed = parse_batch_filename(f.name)
+        if parsed is None:
             unrecognized_batch_files.append(f.name)
+        else:
+            batch_index, part_number = parsed
+            by_batch[batch_index].append((f.name, part_number))
 
     if unrecognized_batch_files:
         preview = ", ".join(unrecognized_batch_files[:5])
@@ -1088,22 +1243,41 @@ def main() -> None:
     # merged graph with content the agent labeled incorrectly.
     unrecognized_set = set(unrecognized_batch_files)
     batches: list[dict[str, Any]] = []
+    current_edge_ids: set[int] = set()
+    empty_batch_warnings: list[str] = []
     for f in batch_files:
         if f.name in unrecognized_set:
             continue
         batch = load_batch(f)
         if batch is not None:
             batches.append(batch)
+            if incremental and f.name != "batch-existing.json":
+                current_edge_ids.update(id(edge) for edge in batch.get("edges", []))
             n = len(batch.get("nodes", []))
             e = len(batch.get("edges", []))
             print(f"  {f.name}: {n} nodes, {e} edges", file=sys.stderr)
+            # A file that parses but contributes nothing is how a silent
+            # partial merge looks from the outside (see #484) — flag it
+            # loudly instead of relying on a downstream reviewer to notice.
+            if n == 0 and e == 0:
+                msg = (
+                    f"{f.name} loaded but contributed 0 nodes and 0 edges — "
+                    f"either the analyzer wrote an empty batch or the file "
+                    f"was read mid-write; inspect it directly"
+                )
+                print(f"  Warning: {msg}", file=sys.stderr)
+                empty_batch_warnings.append(msg)
 
     if not batches:
         print("Error: no valid batch files loaded", file=sys.stderr)
         sys.exit(1)
 
     # Merge and normalize
-    assembled, report = merge_and_normalize(batches)
+    dangling_candidates: list[dict[str, Any]] = []
+    assembled, report = merge_and_normalize(
+        batches, current_edge_ids=current_edge_ids if incremental else None,
+        dangling_candidates=dangling_candidates if incremental else None,
+    )
 
     # Surface missing multi-part files to the phase report (parallel to
     # unrecognized-filename handling below). Stderr lines emitted during
@@ -1117,6 +1291,17 @@ def main() -> None:
             f"— some nodes/edges silently dropped:"
         )
         for w in missing_part_warnings:
+            report.append(f"  - {w}")
+
+    # Surface empty-contribution batches to the phase report (same rationale
+    # as missing_part_warnings above — stderr alone gets buried).
+    if empty_batch_warnings:
+        report.append("")
+        report.append(
+            f"Warning: {len(empty_batch_warnings)} batch file(s) loaded but "
+            f"contributed no nodes or edges:"
+        )
+        for w in empty_batch_warnings:
             report.append(f"  - {w}")
 
     # Surface unrecognized-filename drops to the phase report so the
@@ -1158,6 +1343,26 @@ def main() -> None:
 
     size_kb = output_path.stat().st_size / 1024
     print(f"\nWritten to {output_path} ({size_kb:.0f} KB)", file=sys.stderr)
+
+    # The old symbols live outside batch-existing.json, which intentionally
+    # excludes reanalyzed files. Keep failed output as a diagnostic artifact,
+    # but return failure so the orchestrator repairs it before publication.
+    plan_path = intermediate_dir / "incremental-plan.json"
+    if plan_path.exists():
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        if plan.get("action") in ("PARTIAL_UPDATE", "ARCHITECTURE_UPDATE"):
+            candidate_path = intermediate_dir / "incremental-edge-candidates.json"
+            candidate_temp = candidate_path.with_name(f"{candidate_path.name}.tmp-{os.getpid()}")
+            candidate_temp.write_text(json.dumps({
+                "baseCommit": plan["baseCommit"],
+                "headCommit": plan["headCommit"],
+                "edges": dangling_candidates,
+            }, indent=2, ensure_ascii=False), encoding="utf-8")
+            candidate_temp.replace(candidate_path)
+            validator = Path(__file__).resolve().with_name("validate-incremental-symbols.mjs")
+            result = subprocess.run(["node", str(validator), str(project_root)], check=False)
+            if result.returncode != 0:
+                sys.exit(result.returncode)
 
 
 if __name__ == "__main__":

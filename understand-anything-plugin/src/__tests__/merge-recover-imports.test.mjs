@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,12 +8,28 @@ import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MERGE_SCRIPT = resolve(__dirname, "../../skills/understand/merge-batch-graphs.py");
+const PYTHON = findPython();
 
 let projectRoot;
 let intermediateDir;
 
+function findPython() {
+  const candidates = [
+    { command: "python3", args: [] },
+    { command: "python", args: [] },
+    { command: "py", args: ["-3"] },
+  ];
+  for (const candidate of candidates) {
+    const probe = spawnSync(candidate.command, [...candidate.args, "--version"], {
+      encoding: "utf-8",
+    });
+    if (!probe.error && probe.status === 0) return candidate;
+  }
+  throw new Error("Python 3 is required to run merge-batch-graphs.py tests");
+}
+
 function runMerge() {
-  const result = spawnSync("python3", [MERGE_SCRIPT, projectRoot], {
+  const result = spawnSync(PYTHON.command, [...PYTHON.args, MERGE_SCRIPT, projectRoot], {
     encoding: "utf-8",
   });
   if (result.status !== 0) {
@@ -34,6 +50,14 @@ function fileNode(path) {
     summary: "",
     tags: [],
     complexity: "simple",
+  };
+}
+
+function wholeFileNode(type, path) {
+  return {
+    ...fileNode(path),
+    id: `${type}:${path}`,
+    type,
   };
 }
 
@@ -128,7 +152,7 @@ describe("merge-batch-graphs.py imports recovery", () => {
 
     const { assembled, stderr } = runMerge();
     expect(assembled.edges.filter((e) => e.type === "imports")).toHaveLength(0);
-    expect(stderr).toContain("Skipped 1 importMap source files with no `file:` node");
+    expect(stderr).toContain("Skipped 1 importMap source files with no whole-file node");
   });
 
   it("skips importMap targets that don't have a file: node", () => {
@@ -148,7 +172,7 @@ describe("merge-batch-graphs.py imports recovery", () => {
 
     const { assembled, stderr } = runMerge();
     expect(assembled.edges.filter((e) => e.type === "imports")).toHaveLength(0);
-    expect(stderr).toContain("Skipped 2 importMap target paths with no `file:` node");
+    expect(stderr).toContain("Skipped 2 importMap target paths with no whole-file node");
   });
 
   it("works when scan-result.json is missing (incremental update path)", () => {
@@ -163,7 +187,8 @@ describe("merge-batch-graphs.py imports recovery", () => {
 
     const { assembled, stderr } = runMerge();
     expect(assembled.edges.filter((e) => e.type === "imports")).toHaveLength(1);
-    expect(stderr).toContain("importMap recovery skipped — scan-result.json not found");
+    expect(stderr).toContain("importMap recovery skipped");
+    expect(stderr).toContain("scan-result.json not found");
   });
 
   it("never produces self-import edges", () => {
@@ -183,5 +208,137 @@ describe("merge-batch-graphs.py imports recovery", () => {
 
     const { assembled } = runMerge();
     expect(assembled.edges.filter((e) => e.type === "imports")).toHaveLength(0);
+  });
+
+  it.each([
+    ['file', 'config'],
+    ['file', 'schema'],
+    ['config', 'file'],
+  ])('recovers %s to %s imports through whole-file nodes', (sourceType, targetType) => {
+    writeFileSync(
+      join(intermediateDir, 'batch-0.json'),
+      JSON.stringify({
+        nodes: [
+          wholeFileNode(sourceType, 'src/source.ts'),
+          wholeFileNode(targetType, 'config/target.json'),
+        ],
+        edges: [],
+      }),
+    );
+    writeFileSync(
+      join(intermediateDir, 'scan-result.json'),
+      JSON.stringify({
+        importMap: { 'src/source.ts': ['config/target.json'] },
+      }),
+    );
+
+    const { assembled } = runMerge();
+    expect(assembled.edges.filter((edge) => edge.type === 'imports')).toEqual([
+      expect.objectContaining({
+        source: `${sourceType}:src/source.ts`,
+        target: `${targetType}:config/target.json`,
+      }),
+    ]);
+  });
+
+  it('prefers file nodes over other whole-file nodes for the same path', () => {
+    writeFileSync(
+      join(intermediateDir, 'batch-0.json'),
+      JSON.stringify({
+        nodes: [
+          wholeFileNode('config', 'src/source.ts'),
+          wholeFileNode('file', 'src/source.ts'),
+          wholeFileNode('schema', 'src/target.ts'),
+          wholeFileNode('file', 'src/target.ts'),
+        ],
+        edges: [],
+      }),
+    );
+    writeFileSync(
+      join(intermediateDir, 'scan-result.json'),
+      JSON.stringify({ importMap: { 'src/source.ts': ['src/target.ts'] } }),
+    );
+
+    const { assembled, stderr } = runMerge();
+    expect(assembled.edges.filter((edge) => edge.type === 'imports')).toEqual([
+      expect.objectContaining({
+        source: 'file:src/source.ts',
+        target: 'file:src/target.ts',
+      }),
+    ]);
+    expect(stderr).toContain('multiple whole-file nodes for src/source.ts');
+    expect(stderr).toContain('selected file:src/source.ts');
+  });
+
+  it('does not use child constructs as whole-file import endpoints', () => {
+    const table = {
+      ...wholeFileNode('schema', 'db/schema.sql'),
+      id: 'table:db/schema.sql:users',
+      type: 'table',
+    };
+    writeFileSync(
+      join(intermediateDir, 'batch-0.json'),
+      JSON.stringify({ nodes: [fileNode('src/source.ts'), table], edges: [] }),
+    );
+    writeFileSync(
+      join(intermediateDir, 'scan-result.json'),
+      JSON.stringify({ importMap: { 'src/source.ts': ['db/schema.sql'] } }),
+    );
+
+    const { assembled, stderr } = runMerge();
+    expect(assembled.edges.filter((edge) => edge.type === 'imports')).toHaveLength(0);
+    expect(stderr).toContain('no whole-file node in graph');
+  });
+});
+
+describe("merge-batch-graphs.py data-dir resolution (.ua vs legacy)", () => {
+  // Self-contained: uses its own temp roots rather than the module-global
+  // .understand-anything projectRoot wired up in the top-level beforeEach.
+  function runIn(root) {
+    const result = spawnSync(PYTHON.command, [...PYTHON.args, MERGE_SCRIPT, root], {
+      encoding: "utf-8",
+    });
+    return result;
+  }
+
+  it("fresh project reads/writes under .ua/", () => {
+    const root = mkdtempSync(join(tmpdir(), "ua-merge-uadir-"));
+    try {
+      const inter = join(root, ".ua", "intermediate");
+      mkdirSync(inter, { recursive: true });
+      writeFileSync(
+        join(inter, "batch-0.json"),
+        JSON.stringify({ nodes: [fileNode("src/a.py")], edges: [] }),
+      );
+      const result = runIn(root);
+      expect(result.status).toBe(0);
+      // Output landed in .ua/, legacy dir never created.
+      const out = JSON.parse(
+        readFileSync(join(inter, "assembled-graph.json"), "utf-8"),
+      );
+      expect(out.nodes.map((n) => n.id)).toContain("file:src/a.py");
+      expect(existsSync(join(root, ".understand-anything"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("legacy .understand-anything/ wins even when .ua/ also exists", () => {
+    const root = mkdtempSync(join(tmpdir(), "ua-merge-legacy-"));
+    try {
+      const legacyInter = join(root, ".understand-anything", "intermediate");
+      mkdirSync(legacyInter, { recursive: true });
+      mkdirSync(join(root, ".ua", "intermediate"), { recursive: true });
+      writeFileSync(
+        join(legacyInter, "batch-0.json"),
+        JSON.stringify({ nodes: [fileNode("src/a.py")], edges: [] }),
+      );
+      const result = runIn(root);
+      expect(result.status).toBe(0);
+      expect(existsSync(join(legacyInter, "assembled-graph.json"))).toBe(true);
+      expect(existsSync(join(root, ".ua", "intermediate", "assembled-graph.json"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

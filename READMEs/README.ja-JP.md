@@ -7,34 +7,37 @@
 </p>
 
 <p align="center">
-  <a href="https://trendshift.io/repositories/23482" target="_blank"><img src="https://trendshift.io/api/badge/repositories/23482" alt="Lum1104%2FUnderstand-Anything | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <strong>Understand Anything. <a href="https://egonex.ai">Understand Anyone.</a></strong>
+  <br />
+  <em>AI は人を置き換えるのではなく、人を支えるためにあるべきです。</em>
 </p>
 
 <p align="center">
-  <a href="../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.zh-TW.md">繁體中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.es-ES.md">Español</a> | <a href="README.tr-TR.md">Türkçe</a> | <a href="README.ru-RU.md">Русский</a>
+  <a href="https://trendshift.io/repositories/23482" target="_blank"><img src="https://trendshift.io/api/badge/repositories/23482" alt="Understand Anything | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+</p>
+
+<p align="center">
+  <a href="../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.zh-TW.md">繁體中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.es-ES.md">Español</a> | <a href="README.tr-TR.md">Türkçe</a> | <a href="README.ru-RU.md">Русский</a> | <a href="README.vi-VN.md">Tiếng Việt</a>
 </p>
 
 <p align="center">
   <a href="#-クイックスタート"><img src="https://img.shields.io/badge/Quick_Start-blue" alt="クイックスタート" /></a>
-  <a href="https://github.com/Lum1104/Understand-Anything/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="License: MIT" /></a>
+  <a href="https://github.com/Egonex-AI/Understand-Anything/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="License: MIT" /></a>
   <a href="https://docs.anthropic.com/en/docs/claude-code"><img src="https://img.shields.io/badge/Claude_Code-8A2BE2" alt="Claude Code" /></a>
   <a href="#codex"><img src="https://img.shields.io/badge/Codex-000000" alt="Codex" /></a>
   <a href="#vs-code--github-copilot"><img src="https://img.shields.io/badge/Copilot-24292e" alt="Copilot" /></a>
   <a href="#copilot-cli"><img src="https://img.shields.io/badge/Copilot_CLI-24292e" alt="Copilot CLI" /></a>
   <a href="#gemini-cli"><img src="https://img.shields.io/badge/Gemini_CLI-4285F4" alt="Gemini CLI" /></a>
   <a href="#opencode"><img src="https://img.shields.io/badge/OpenCode-38bdf8" alt="OpenCode" /></a>
+  <a href="#mistral-vibe-cli"><img src="https://img.shields.io/badge/Vibe_CLI-7c3aed" alt="Vibe CLI" /></a>
+  <a href="#trae"><img src="https://img.shields.io/badge/Trae-7e22ce" alt="Trae" /></a>
   <a href="https://understand-anything.com"><img src="https://img.shields.io/badge/Homepage-d4a574" alt="ホームページ" /></a>
   <a href="https://understand-anything.com/demo/"><img src="https://img.shields.io/badge/Live_Demo-00c853" alt="ライブデモ" /></a>
+  <a href="https://egonex.ai"><img src="https://img.shields.io/badge/Understand_Anyone-egonex.ai-d4a574" alt="Understand Anyone" /></a>
 </p>
 
 <p align="center">
   <img src="../assets/hero.png" alt="Understand Anything — あらゆるコードベースをインタラクティブなナレッジグラフに変換" width="800" />
-</p>
-
-<p align="center">
-  <strong>💬 <a href="https://discord.gg/pydat66RY">Discord コミュニティに参加 &rarr;</a></strong>
-  <br />
-  <em>質問・作品の共有・コミュニティとの交流はこちらから。</em>
 </p>
 
 ---
@@ -104,9 +107,11 @@ Understand Anything は [Claude Code Plugin](https://code.claude.com/docs/en/plu
 ### 1. プラグインをインストール
 
 ```bash
-/plugin marketplace add Lum1104/Understand-Anything
+/plugin marketplace add Egonex-AI/Understand-Anything
 /plugin install understand-anything
 ```
+
+> **ローカルモデルを使う場合:** プライバシーやエンタープライズ用途では、[Ollama](https://docs.ollama.com/integrations) などのローカルモデルプロバイダーにプラットフォームを向けてください。統合ガイドに従ってモデルプロバイダーを変更できます。
 
 ### 2. コードベースを分析
 
@@ -114,7 +119,9 @@ Understand Anything は [Claude Code Plugin](https://code.claude.com/docs/en/plu
 /understand
 ```
 
-マルチエージェントパイプラインがプロジェクトをスキャンし、すべてのファイル・関数・クラス・依存関係を抽出して、`.understand-anything/knowledge-graph.json` にナレッジグラフを保存します。
+マルチエージェントパイプラインがプロジェクトをスキャンし、すべてのファイル・関数・クラス・依存関係を抽出して、`.ua/knowledge-graph.json` にナレッジグラフを保存します。（すでに `.understand-anything/` ディレクトリがあるプロジェクトはそれを引き続き使用します。存在する場合はそれがデータディレクトリのままなので、移行は不要です。）
+
+> **トークン使用量にご注意:** 初回の `/understand` はコードベース全体を分析するため、大規模プロジェクトではかなりのトークンを消費することがあります。トークンプラン / サブスクリプションでの実行、または初期化にはローカルモデル（上記参照）の使用をおすすめします。以降の実行はデフォルトで増分処理され、変更されたファイルのみ再分析するため、消費トークンは大幅に少なくなります。
 
 **ローカライズされた出力：** `--language` を使用して、希望の言語でコンテンツを生成：
 
@@ -122,8 +129,10 @@ Understand Anything は [Claude Code Plugin](https://code.claude.com/docs/en/plu
 # 日本語でコンテンツを生成（ナレッジグラフのノード説明とダッシュボードUI）
 /understand --language ja
 
-# サポート言語：en（デフォルト）、zh、zh-TW、ja、ko、ru
+# サポート言語：en（デフォルト）、zh、zh-TW、ja、ko、ru、vi
 ```
+
+プロジェクトでの**初回実行時**に `--language` を指定せず、保存済みの言語設定もない場合、`/understand` は会話で使われている言語を検出します。英語以外が検出された場合は、生成前にその言語を使用するか、別の言語へ変更するかを確認します。英語での会話には影響しません。選択結果は `.ua/config.json` に保存され、以降の実行でも再利用されます。
 
 `--language` パラメータは以下に影響します：
 - ナレッジグラフのノードサマリーと説明
@@ -178,27 +187,29 @@ Understand-Anythingは複数のAIコーディングプラットフォームで�
 ### Claude Code（ネイティブ）
 
 ```bash
-/plugin marketplace add Lum1104/Understand-Anything
+/plugin marketplace add Egonex-AI/Understand-Anything
 /plugin install understand-anything
 ```
 
-### ワンラインインストール（Codex / OpenCode / OpenClaw / Antigravity / Gemini CLI / Pi Agent / Vibe CLI / VS Code Copilot / Hermes / Cline / KIMI CLI）
+### ワンラインインストール（Codex / OpenCode / OpenClaw / Antigravity / Gemini CLI / Pi Agent / Vibe CLI / VS Code Copilot / Hermes / Cline / KIMI CLI / Trae / Nanobot / Kiro）
 
 **macOS / Linux：**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lum1104/Understand-Anything/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Egonex-AI/Understand-Anything/main/install.sh | bash
 # プラットフォームを直接指定して対話プロンプトをスキップすることもできます：
-curl -fsSL https://raw.githubusercontent.com/Lum1104/Understand-Anything/main/install.sh | bash -s codex
+curl -fsSL https://raw.githubusercontent.com/Egonex-AI/Understand-Anything/main/install.sh | bash -s codex
 ```
 
 **Windows（PowerShell）：**
 ```powershell
-iwr -useb https://raw.githubusercontent.com/Lum1104/Understand-Anything/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/Egonex-AI/Understand-Anything/main/install.ps1 | iex
 ```
 
 インストーラーはリポジトリを `~/.understand-anything/repo` にクローンし、選択したプラットフォーム用のシンボリックリンクを作成します。完了後はCLI/IDEを再起動してください。
 
-- サポートされる `<platform>` 値：`gemini`、`codex`、`opencode`、`pi`、`openclaw`、`antigravity`、`vibe`、`vscode`、`hermes`、`cline`、`kimi`
+> **スキルの呼び出し方について：** 呼び出しのプレフィックスはプラットフォームごとに異なります。多くのプラットフォームはスラッシュコマンド（`/understand`）を使いますが、**Codexは`$`を使います** — `/understand`ではなく`$understand`と入力してください。どちらのプレフィックスも認識されない場合は、*「understandスキルを使ってこのプロジェクトを分析して」*のように自然言語で依頼できます。
+
+- サポートされる `<platform>` 値：`gemini`、`codex`、`opencode`、`pi`、`openclaw`、`antigravity`、`vibe`、`vscode`、`hermes`、`cline`、`kimi`、`trae`、`nanobot`、`kiro`
 - 後で更新：`./install.sh --update`
 - アンインストール：`./install.sh --uninstall <platform>`
 
@@ -206,7 +217,7 @@ iwr -useb https://raw.githubusercontent.com/Lum1104/Understand-Anything/main/ins
 
 Cursorはこのリポジトリをクローンすると `.cursor-plugin/plugin.json` 経由でプラグインを自動検出します。手動インストールは不要です — クローンしてCursorで開くだけです。
 
-自動検出されない場合は、手動でインストールしてください：**Cursor Settings → Plugins** を開き、検索欄に `https://github.com/Lum1104/Understand-Anything` を貼り付けて追加します。
+自動検出されない場合は、手動でインストールしてください：**Cursor Settings → Plugins** を開き、検索欄に `https://github.com/Egonex-AI/Understand-Anything` を貼り付けて追加します。
 
 ### VS Code + GitHub Copilot
 
@@ -217,8 +228,20 @@ GitHub Copilot拡張機能（v1.108+）をインストールしたVS Codeは、`
 ### Copilot CLI
 
 ```bash
-copilot plugin install Lum1104/Understand-Anything:understand-anything-plugin
+copilot plugin install Egonex-AI/Understand-Anything:understand-anything-plugin
 ```
+
+### Kiro CLI / IDE
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Egonex-AI/Understand-Anything/main/install.sh | bash -s kiro
+```
+
+インストール後：
+- **Kiro CLI**：`kiro-cli chat --agent understand "このプロジェクトを解析して"`
+- **Kiro IDE**：スキルは `~/.kiro/skills/` にシンボリックリンクされ、`understand` エージェントは `~/.kiro/agents/understand.json` に書き込まれます。そのため、IDEを再起動するとどちらも利用可能になります。
+
+全プロジェクトで使用するパーソナルスキルとして導入したい場合は、上記の `install.sh` を `kiro` プラットフォームで実行してください。
 
 ### プラットフォーム互換性
 
@@ -238,6 +261,9 @@ copilot plugin install Lum1104/Understand-Anything:understand-anything-plugin
 | Hermes | ✅ サポート | `install.sh hermes` |
 | Cline | ✅ サポート | `install.sh cline` |
 | KIMI CLI | ✅ サポート | `install.sh kimi` |
+| Trae | ✅ サポート | `install.sh trae` |
+| Nanobot | ✅ サポート | `install.sh nanobot` |
+| Kiro CLI / IDE | ✅ サポート | `install.sh kiro` |
 
 ---
 
@@ -245,13 +271,13 @@ copilot plugin install Lum1104/Understand-Anything:understand-anything-plugin
 
 グラフは単なる JSON ファイルです——**一度コミットすれば、チームメンバーはパイプラインを実行せずに済みます**。オンボーディング、PR レビュー、docs-as-code ワークフローに最適です。
 
-> **例：** [GoogleCloudPlatform/microservices-demo（fork）](https://github.com/Lum1104/microservices-demo) —— コミット済みのグラフを含む Go / Java / Python / Node のリファレンスプロジェクト。
+> **例：** [GoogleCloudPlatform/microservices-demo](https://github.com/GoogleCloudPlatform/microservices-demo) —— コミット済みのグラフを含む Go / Java / Python / Node のリファレンスプロジェクト。
 
-**コミット対象：** `.understand-anything/` 内のすべてのファイル。ただし `intermediate/` と `diff-overlay.json` は除きます（これらはローカルの一時ファイルです）。
+**コミット対象：** `.ua/` 内のすべてのファイル。ただし `intermediate/` と `diff-overlay.json` は除きます（これらはローカルの一時ファイルです）。（レガシープロジェクトは `.understand-anything/` を使用します。そのディレクトリが存在する場合は、以下のディレクトリ名をそれに置き換えてください。）
 
 ```gitignore
-.understand-anything/intermediate/
-.understand-anything/diff-overlay.json
+.ua/intermediate/
+.ua/diff-overlay.json
 ```
 
 **最新状態を保つ：** `/understand --auto-update` を有効にすると、post-commit フックがグラフを増分的に更新し、各コミットに対応するグラフが揃います。またはリリース前に `/understand` を手動で再実行します。
@@ -260,9 +286,21 @@ copilot plugin install Lum1104/Understand-Anything:understand-anything-plugin
 
 ```bash
 git lfs install
-git lfs track ".understand-anything/*.json"
-git add .gitattributes .understand-anything/
+git lfs track ".ua/*.json"
+git add .gitattributes .ua/
 ```
+
+### Claude Code なしでダッシュボードを表示する
+
+グラフを生成してコミットしておけば、チームの誰でもコマンド一つで開けます。Claude Code も LLM も API キーも不要で、必要なのは Node.js（>= 18）だけです：
+
+```bash
+npx https://github.com/Egonex-AI/Understand-Anything/releases/latest/download/understand-anything-viewer.tgz /path/to/analyzed/project
+```
+
+ターミナルにトークン付き URL（`http://127.0.0.1:5173/?token=…`）が表示され、完全にインタラクティブなダッシュボードがブラウザで開きます。プロジェクトディレクトリ（デフォルト：カレントディレクトリ）には、コミットされたデータディレクトリ（`.ua/`、または旧来の `.understand-anything/`）が含まれている必要があります。すべてローカルディスクから読み取り専用で配信され、LLM 呼び出しは行われず、データがマシンの外に出ることはありません。
+
+リポジトリのクローンから作業する場合は、`pnpm install && pnpm --filter @understand-anything/core build` の後に `GRAPH_DIR=/path/to/analyzed/project pnpm dev:dashboard` を実行すれば、Vite 開発サーバー経由で同じことができます。
 
 ---
 
@@ -279,7 +317,7 @@ git add .gitattributes .understand-anything/
 
 ### マルチエージェントパイプライン
 
-`/understand` コマンドは5つの専門エージェントをオーケストレーションし、`/understand-domain` は6つ目を追加します：
+`/understand` コマンドは5つの専門エージェントをオーケストレーションし、`/understand-domain` は6つ目、`/understand-knowledge` は7つ目を追加します：
 
 | エージェント | 役割 |
 |-------|------|
@@ -287,11 +325,11 @@ git add .gitattributes .understand-anything/
 | `file-analyzer` | 関数・クラス・インポートの抽出、グラフノードとエッジの生成 |
 | `architecture-analyzer` | アーキテクチャ層の特定 |
 | `tour-builder` | ガイド学習ツアーの生成 |
-| `graph-reviewer` | グラフの完全性と参照整合性の検証 |
+| `graph-reviewer` | グラフの完全性と参照整合性を検証（デフォルトではインライン実行。LLMによる完全レビューは `--review` を使用） |
 | `domain-analyzer` | ビジネスドメイン、フロー、処理ステップの抽出（`/understand-domain` で使用） |
 | `article-analyzer` | wiki 記事からエンティティ、主張、暗黙の関係を抽出（`/understand-knowledge` で使用） |
 
-ファイルアナライザーは並列実行されます（最大3つ同時）。インクリメンタル更新に対応しており、前回の実行から変更されたファイルのみを再分析します。
+ファイルアナライザーは並列実行されます（最大5つ同時、1バッチあたり20〜30ファイル）。インクリメンタル更新に対応しており、前回の実行から変更されたファイルのみを再分析します。
 
 ---
 
@@ -328,11 +366,11 @@ git add .gitattributes .understand-anything/
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Lum1104%2FUnderstand-Anything&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=Egonex-AI%2FUnderstand-Anything&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=Lum1104/Understand-Anything&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=Lum1104/Understand-Anything&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=Lum1104/Understand-Anything&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=Egonex-AI/Understand-Anything&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=Egonex-AI/Understand-Anything&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=Egonex-AI/Understand-Anything&type=date&legend=top-left" />
  </picture>
 </a>
 
@@ -341,5 +379,5 @@ git add .gitattributes .understand-anything/
 </p>
 
 <p align="center">
-  MIT License &copy; <a href="https://github.com/Lum1104">Lum1104</a>
+  MIT License &copy; Yuxiang Lin and Infinite Universe, Inc.
 </p>
