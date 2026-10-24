@@ -39,6 +39,9 @@ An open-source tool combining LLM intelligence + static analysis to produce inte
 - `pnpm test` — Run all tests (skill tests live at repo-root `tests/skill/`, picked up by root `vitest.config.ts`)
 - `pnpm --filter @understand-anything/dashboard build` — Build the dashboard
 - `pnpm dev:dashboard` — Start dashboard dev server
+- `pnpm ua:start [projectDir]` — Start the dashboard in the background for a project's knowledge graph (default: cwd; requires `.ua/` or legacy data dir). Prints the tokenized URL; survives the terminal via WMI on Windows / detached spawn on POSIX
+- `pnpm ua:stop [projectDir]` — Stop the background dashboard started by `ua:start` (PID file in os.tmpdir; `taskkill /T` on Windows, process-group kill on POSIX)
+- `pnpm ua:status [projectDir]` — Show whether the background dashboard is running and its URL. All three wrap `scripts/dashboard.mjs <start|stop|status>`
 - `pnpm lint` — Run ESLint across the project
 
 ## Conventions

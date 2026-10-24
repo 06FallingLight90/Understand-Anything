@@ -366,6 +366,14 @@ Contributions are welcome! Here's how to get started:
 3. Run the tests (`pnpm --filter @understand-anything/core test`)
 4. Commit your changes and open a pull request
 
+To preview the dashboard for a project without going through an agent, use the fixed control commands (scripts only exist in a development checkout):
+
+```bash
+pnpm ua:start [projectDir]   # background dashboard; prints the tokenized URL
+pnpm ua:stop  [projectDir]   # stop the background dashboard
+pnpm ua:status [projectDir]  # running? + URL
+```
+
 Please open an issue first for major changes so we can discuss the approach.
 
 ---

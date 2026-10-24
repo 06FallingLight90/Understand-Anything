@@ -32,6 +32,9 @@
     "test": "vitest run",
     "benchmark:large-repo": "node scripts/benchmark-large-repo.mjs",
     "dev:dashboard": "pnpm --filter @understand-anything/dashboard dev",
+    "ua:start": "node scripts/dashboard.mjs start",
+    "ua:stop": "node scripts/dashboard.mjs stop",
+    "ua:status": "node scripts/dashboard.mjs status",
     "lint": "eslint ."
   },
   "devDependencies": {
